@@ -1,0 +1,82 @@
+name: build-image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_REGISTRY_USERNAME: ${{ github.actor }}
+  IMAGE_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+  IMAGE_X86_MICRO_ARCH_VARIANTS: "x86-64-v3,x86-64-v2"
+  # See https://github.com/madler/zlib/tags
+  IMAGE_DEP_ZLIB_VERSION: 1.3.2
+  IMAGE_DEP_ZLIB_COMMIT: da607da739fa6047df13e66a2af6b8bec7c2a498
+  # See https://github.com/openssl/openssl/tags
+  IMAGE_DEP_OPENSSL_VERSION: 4.0.3
+  IMAGE_DEP_OPENSSL_COMMIT: af1775b60dfa141a4ad762585052cabeb9f37e9e
+  # See https://github.com/boostorg/boost/tags
+  IMAGE_DEP_BOOST_VERSION: 1.92.0
+  IMAGE_DEP_BOOST_COMMIT: afdfa32505af73e3d208144b3f623f0096cb62b6
+  # Notes: for qBittorrent 5.1.4, libtorrent 2.0.x is required.
+  # See https://github.com/arvidn/libtorrent/tags
+  IMAGE_DEP_LIBTORRENT_VERSION: 2.0.15
+  IMAGE_DEP_LIBTORRENT_COMMIT: 1eb18faeae156d8dbbab42935c082f8b81f50989
+  # See https://github.com/qt/qtbase/tags and https://github.com/qt/qttools/tags
+  IMAGE_DEP_QT_VERSION: 6.12.0
+  IMAGE_DEP_QT_BASE_COMMIT: 025bdad181de241e81bf853c8a2d7bf3d19261a9
+  IMAGE_DEP_QT_TOOLS_COMMIT: 613a6fbf0a7998010ab2fda260b64066d66a021d
+  # See https://github.com/qbittorrent/qBittorrent/tags
+  IMAGE_QBITTORRENT_VERSION: 5.1.4
+  IMAGE_QBITTORRENT_COMMIT: 33e5e772200b5e2f9d23af8870ce7436ec216faa
+  IMAGE_BUILD_REVISION: 0
+  # See https://quay.io/repository/buildah/stable?tab=tags
+  IMAGE_BUILDAH_VERSION: 1.43.5-immutable
+  IMAGE_BUILDAH_DIGEST: 7c2b605262748ace2c5c57c5550942d0adad57aec82ede3070927722306c0ffb
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        # https://github.com/actions/checkout/releases/tag/v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: |
+          podman run \
+              --rm \
+              --device /dev/fuse \
+              --security-opt label=disable \
+              -v "$PWD:/workspace" \
+              -w /workspace \
+              -e IMAGE_NAME="${IMAGE_NAME}" \
+              -e IMAGE_REGISTRY="${IMAGE_REGISTRY}" \
+              -e IMAGE_REGISTRY_USERNAME="${IMAGE_REGISTRY_USERNAME}" \
+              -e IMAGE_REGISTRY_PASSWORD="${IMAGE_REGISTRY_PASSWORD}" \
+              -e IMAGE_X86_MICRO_ARCH_VARIANTS="${IMAGE_X86_MICRO_ARCH_VARIANTS}" \
+              -e IMAGE_DEP_ZLIB_VERSION="${IMAGE_DEP_ZLIB_VERSION}" \
+              -e IMAGE_DEP_ZLIB_COMMIT="${IMAGE_DEP_ZLIB_COMMIT}" \
+              -e IMAGE_DEP_OPENSSL_VERSION="${IMAGE_DEP_OPENSSL_VERSION}" \
+              -e IMAGE_DEP_OPENSSL_COMMIT="${IMAGE_DEP_OPENSSL_COMMIT}" \
+              -e IMAGE_DEP_BOOST_VERSION="${IMAGE_DEP_BOOST_VERSION}" \
+              -e IMAGE_DEP_BOOST_COMMIT="${IMAGE_DEP_BOOST_COMMIT}" \
+              -e IMAGE_DEP_LIBTORRENT_VERSION="${IMAGE_DEP_LIBTORRENT_VERSION}" \
+              -e IMAGE_DEP_LIBTORRENT_COMMIT="${IMAGE_DEP_LIBTORRENT_COMMIT}" \
+              -e IMAGE_DEP_QT_VERSION="${IMAGE_DEP_QT_VERSION}" \
+              -e IMAGE_DEP_QT_BASE_COMMIT="${IMAGE_DEP_QT_BASE_COMMIT}" \
+              -e IMAGE_DEP_QT_TOOLS_COMMIT="${IMAGE_DEP_QT_TOOLS_COMMIT}" \
+              -e IMAGE_QBITTORRENT_VERSION="${IMAGE_QBITTORRENT_VERSION}" \
+              -e IMAGE_QBITTORRENT_COMMIT="${IMAGE_QBITTORRENT_COMMIT}" \
+              -e IMAGE_BUILD_REVISION="${IMAGE_BUILD_REVISION}" \
+              --user=root \
+              quay.io/buildah/stable:v${IMAGE_BUILDAH_VERSION}@sha256:${IMAGE_BUILDAH_DIGEST} \
+              ./build.sh --push

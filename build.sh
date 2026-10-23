@@ -1,0 +1,165 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# ================================
+# Variables
+
+PUSH=false
+
+IMAGE_QBITTORRENT_VERSION="${IMAGE_QBITTORRENT_VERSION:-}"
+IMAGE_QBITTORRENT_COMMIT="${IMAGE_QBITTORRENT_COMMIT:-}"
+IMAGE_DEP_LIBTORRENT_VERSION="${IMAGE_DEP_LIBTORRENT_VERSION:-}"
+IMAGE_DEP_LIBTORRENT_COMMIT="${IMAGE_DEP_LIBTORRENT_COMMIT:-}"
+IMAGE_DEP_BOOST_VERSION="${IMAGE_DEP_BOOST_VERSION:-}"
+IMAGE_DEP_BOOST_COMMIT="${IMAGE_DEP_BOOST_COMMIT:-}"
+IMAGE_DEP_OPENSSL_VERSION="${IMAGE_DEP_OPENSSL_VERSION:-}"
+IMAGE_DEP_OPENSSL_COMMIT="${IMAGE_DEP_OPENSSL_COMMIT:-}"
+IMAGE_DEP_ZLIB_VERSION="${IMAGE_DEP_ZLIB_VERSION:-}"
+IMAGE_DEP_ZLIB_COMMIT="${IMAGE_DEP_ZLIB_COMMIT:-}"
+IMAGE_DEP_QT_VERSION="${IMAGE_DEP_QT_VERSION:-}"
+IMAGE_DEP_QT_BASE_COMMIT="${IMAGE_DEP_QT_BASE_COMMIT:-}"
+IMAGE_DEP_QT_TOOLS_COMMIT="${IMAGE_DEP_QT_TOOLS_COMMIT:-}"
+IMAGE_BUILD_REVISION="${IMAGE_BUILD_REVISION:-}"
+
+IMAGE_NAME="${IMAGE_NAME:-}"
+IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
+
+IMAGE_X86_MICRO_ARCH_VARIANTS="${IMAGE_X86_MICRO_ARCH_VARIANTS:-x86-64-v2}"
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--push)
+		PUSH=true
+		shift
+		;;
+	*)
+		echo "Unknown option: '$1'"
+		exit 1
+		;;
+	esac
+done
+
+for var in \
+	IMAGE_NAME \
+	IMAGE_REGISTRY \
+	IMAGE_QBITTORRENT_VERSION \
+	IMAGE_QBITTORRENT_COMMIT \
+	IMAGE_DEP_LIBTORRENT_VERSION \
+	IMAGE_DEP_LIBTORRENT_COMMIT \
+	IMAGE_DEP_BOOST_VERSION \
+	IMAGE_DEP_BOOST_COMMIT \
+	IMAGE_DEP_OPENSSL_VERSION \
+	IMAGE_DEP_OPENSSL_COMMIT \
+	IMAGE_DEP_ZLIB_VERSION \
+	IMAGE_DEP_ZLIB_COMMIT \
+	IMAGE_DEP_QT_VERSION \
+	IMAGE_DEP_QT_BASE_COMMIT \
+	IMAGE_DEP_QT_TOOLS_COMMIT \
+	IMAGE_BUILD_REVISION; do
+	if [ -z "${!var}" ]; then
+		echo "Missing required variable: $var"
+		exit 1
+	fi
+done
+
+IMAGE_QBITTORRENT_VERSION_MAJOR=$(echo "${IMAGE_QBITTORRENT_VERSION%%-*}" | awk -F. '{print $1}')
+IMAGE_QBITTORRENT_VERSION_MINOR=$(echo "${IMAGE_QBITTORRENT_VERSION%%-*}" | awk -F. '{print $2}')
+IMAGE_QBITTORRENT_VERSION_PATCH=$(echo "${IMAGE_QBITTORRENT_VERSION%%-*}" | awk -F. '{print $3}')
+
+IMAGE_QBITTORRENT_VERSION_MAJOR=${IMAGE_QBITTORRENT_VERSION_MAJOR:-0}
+IMAGE_QBITTORRENT_VERSION_MINOR=${IMAGE_QBITTORRENT_VERSION_MINOR:-0}
+IMAGE_QBITTORRENT_VERSION_PATCH=${IMAGE_QBITTORRENT_VERSION_PATCH:-0}
+
+# ================================
+# VCS Information
+
+git config --global --add safe.directory "*" 2>/dev/null || true
+
+IMAGE_VCS_DATE_EPOCH=$(git log -1 --pretty=%ct)
+IMAGE_VCS_DATE=$(date -u -d @$IMAGE_VCS_DATE_EPOCH +'%Y-%m-%dT%H:%M:%S+00:00')
+IMAGE_VCS_REV=$(git rev-parse HEAD)
+
+# ================================
+# Sources
+
+IMAGE_BUILD_BASE_TAG="localhost/${IMAGE_NAME}:build-base"
+
+buildah build \
+	--no-cache \
+	--jobs=16 \
+	--timestamp="${IMAGE_VCS_DATE_EPOCH}" \
+	--build-arg IMAGE_VCS_DATE_EPOCH="${IMAGE_VCS_DATE_EPOCH}" \
+	--build-arg IMAGE_QBITTORRENT_VERSION="${IMAGE_QBITTORRENT_VERSION}" \
+	--build-arg IMAGE_QBITTORRENT_COMMIT="${IMAGE_QBITTORRENT_COMMIT}" \
+	--build-arg IMAGE_DEP_LIBTORRENT_VERSION="${IMAGE_DEP_LIBTORRENT_VERSION}" \
+	--build-arg IMAGE_DEP_LIBTORRENT_COMMIT="${IMAGE_DEP_LIBTORRENT_COMMIT}" \
+	--build-arg IMAGE_DEP_BOOST_VERSION="${IMAGE_DEP_BOOST_VERSION}" \
+	--build-arg IMAGE_DEP_BOOST_COMMIT="${IMAGE_DEP_BOOST_COMMIT}" \
+	--build-arg IMAGE_DEP_OPENSSL_VERSION="${IMAGE_DEP_OPENSSL_VERSION}" \
+	--build-arg IMAGE_DEP_OPENSSL_COMMIT="${IMAGE_DEP_OPENSSL_COMMIT}" \
+	--build-arg IMAGE_DEP_ZLIB_VERSION="${IMAGE_DEP_ZLIB_VERSION}" \
+	--build-arg IMAGE_DEP_ZLIB_COMMIT="${IMAGE_DEP_ZLIB_COMMIT}" \
+	--build-arg IMAGE_DEP_QT_VERSION="${IMAGE_DEP_QT_VERSION}" \
+	--build-arg IMAGE_DEP_QT_BASE_COMMIT="${IMAGE_DEP_QT_BASE_COMMIT}" \
+	--build-arg IMAGE_DEP_QT_TOOLS_COMMIT="${IMAGE_DEP_QT_TOOLS_COMMIT}" \
+	-t "${IMAGE_BUILD_BASE_TAG}" \
+	-f Dockerfile.build-base .
+
+# ================================
+# Build & Push
+
+if [ "$PUSH" = true ]; then
+	for var in IMAGE_REGISTRY_USERNAME IMAGE_REGISTRY_PASSWORD; do
+		if [ -z "${!var:-}" ]; then
+			echo "Missing required variable: $var"
+			exit 1
+		fi
+	done
+
+	echo "$IMAGE_REGISTRY_PASSWORD" | buildah login "$IMAGE_REGISTRY" -u "$IMAGE_REGISTRY_USERNAME" --password-stdin
+fi
+
+IFS=',' read -r -a IMAGE_X86_MICRO_ARCH_VARIANT_LIST <<<"${IMAGE_X86_MICRO_ARCH_VARIANTS:-}"
+
+for march in "${IMAGE_X86_MICRO_ARCH_VARIANT_LIST[@]}"; do
+	case "$march" in
+	x86-64)
+		variant="v1"
+		;;
+	x86-64-v2 | x86-64-v3 | x86-64-v4)
+		variant="${march#x86-64-}"
+		;;
+	*)
+		echo "Unsupported march: $march"
+		exit 1
+		;;
+	esac
+
+	tag="localhost/${IMAGE_NAME}:build-x86-64-$variant"
+
+	buildah build \
+		--no-cache \
+		--jobs=1 \
+		--timestamp="${IMAGE_VCS_DATE_EPOCH}" \
+		--build-arg IMAGE_VCS_DATE_EPOCH="${IMAGE_VCS_DATE_EPOCH}" \
+		--build-arg IMAGE_BUILD_BASE_TAG="${IMAGE_BUILD_BASE_TAG}" \
+		--build-arg IMAGE_X86_MICRO_ARCH="${march}" \
+		--build-arg IMAGE_VCS_DATE="${IMAGE_VCS_DATE}" \
+		--build-arg IMAGE_VCS_REV="${IMAGE_VCS_REV}" \
+		--build-arg IMAGE_QBITTORRENT_VERSION="${IMAGE_QBITTORRENT_VERSION}" \
+		--build-arg IMAGE_BUILD_REVISION="${IMAGE_BUILD_REVISION}" \
+		-t "$tag" \
+		-f Dockerfile .
+
+	if [ "$PUSH" = true ]; then
+		for image in \
+			"${IMAGE_REGISTRY}/${IMAGE_NAME}-x86-64-$variant:${IMAGE_QBITTORRENT_VERSION}-r${IMAGE_BUILD_REVISION}" \
+			"${IMAGE_REGISTRY}/${IMAGE_NAME}-x86-64-$variant:${IMAGE_QBITTORRENT_VERSION_MAJOR}.${IMAGE_QBITTORRENT_VERSION_MINOR}.${IMAGE_QBITTORRENT_VERSION_PATCH}" \
+			"${IMAGE_REGISTRY}/${IMAGE_NAME}-x86-64-$variant:${IMAGE_QBITTORRENT_VERSION_MAJOR}.${IMAGE_QBITTORRENT_VERSION_MINOR}" \
+			"${IMAGE_REGISTRY}/${IMAGE_NAME}-x86-64-$variant:${IMAGE_QBITTORRENT_VERSION_MAJOR}" \
+			"${IMAGE_REGISTRY}/${IMAGE_NAME}-x86-64-$variant:latest"; do
+			buildah push --format oci "$tag" "docker://${image}"
+		done
+	fi
+done

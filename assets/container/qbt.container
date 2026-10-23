@@ -1,0 +1,31 @@
+[Unit]
+Description='qBittorrent' container service
+RequiresMountsFor=%t/containers
+
+[Container]
+ContainerName=qbt
+Image=ghcr.io/hanyu-dev/oci-image-qbittorrent:5.1
+AutoUpdate=registry
+NoNewPrivileges=true
+DropCapability=ALL
+SeccompProfile=%h/.local/share/qBittorrent/seccomp.json
+UserNS=keep-id:uid=65532,gid=65532
+# Network=host
+PublishPort=6880:6880
+PublishPort=52881:52881
+PublishPort=52881:52881/udp
+# Environment=QBT_WEBUI_ADDRESS=0.0.0.0
+# Environment=QBT_WEBUI_PORT=6880
+# Environment=QBT_TORRENTING_PORT=52881
+Volume=%h/.local/share/qBittorrent/config:/opt/qBittorrent/config
+Volume=%h/.local/share/qBittorrent/data:/opt/qBittorrent/data
+Volume=%h/.local/share/qBittorrent/logs:/opt/qBittorrent/logs
+Volume=%h/.local/share/qBittorrent/themes:/opt/qBittorrent/themes
+# Volume=%h/.local/share/qBittorrent/downloads:/opt/qBittorrent/downloads
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target
